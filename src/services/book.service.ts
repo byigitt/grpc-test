@@ -21,11 +21,11 @@ export class BookService implements grpc.UntypedServiceImplementation {
     this.fastify = fastify;
   }
 
-  async getBook(call: ServerUnaryCall<GetBookRequest, Book>, callback: sendUnaryData<Book>) {
+  async GetBook(call: ServerUnaryCall<GetBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const { id } = call.request;
-      const { rows } = await this.fastify.pg.query(
-        'SELECT * FROM books WHERE id = $1',
+      const { rows } = await this.fastify.pg.query<Book>(
+        'SELECT id, title, author, isbn, publish_year as "publishYear" FROM books WHERE id = $1',
         [id]
       );
       
@@ -45,78 +45,114 @@ export class BookService implements grpc.UntypedServiceImplementation {
     }
   }
 
-  async createBook(call: ServerUnaryCall<CreateBookRequest, Book>, callback: sendUnaryData<Book>) {
+  async CreateBook(call: ServerUnaryCall<CreateBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const { title, author, isbn, publishYear } = call.request;
-      const { rows } = await this.fastify.pg.query(
-        'INSERT INTO books (title, author, isbn, publishYear) VALUES ($1, $2, $3, $4) RETURNING *',
+
+      // Validate ISBN format
+      if (isbn && !/^\d{13}$/.test(isbn)) {
+        return callback({
+          code: Status.INVALID_ARGUMENT,
+          message: 'ISBN must be 13 digits',
+        });
+      }
+
+      const { rows } = await this.fastify.pg.query<Book>(
+        `INSERT INTO books (title, author, isbn, publish_year) 
+         VALUES ($1, $2, $3, $4) 
+         RETURNING id, title, author, isbn, publish_year as "publishYear"`,
         [title, author, isbn, publishYear]
       );
 
       callback(null, rows[0]);
-    } catch (error) {
+    } catch (error: any) {
+      if (error.constraint === 'books_isbn_key') {
+        return callback({
+          code: Status.ALREADY_EXISTS,
+          message: 'Book with this ISBN already exists',
+        });
+      }
+
       callback({
-        code: 13,
-        message: 'Internal server error'
+        code: Status.INTERNAL,
+        message: 'Internal server error',
       });
     }
   }
 
-  async listBooks(call: ServerUnaryCall<ListBooksRequest, ListBooksResponse>, callback: sendUnaryData<ListBooksResponse>) {
+  async ListBooks(call: ServerUnaryCall<ListBooksRequest, ListBooksResponse>, callback: sendUnaryData<ListBooksResponse>) {
     try {
       const { page = 1, limit = 10 } = call.request;
       const offset = (page - 1) * limit;
 
-      const { rows: books } = await this.fastify.pg.query(
-        'SELECT * FROM books ORDER BY id LIMIT $1 OFFSET $2',
+      const { rows: books } = await this.fastify.pg.query<Book>(
+        `SELECT id, title, author, isbn, publish_year as "publishYear" 
+         FROM books 
+         ORDER BY created_at DESC 
+         LIMIT $1 OFFSET $2`,
         [limit, offset]
       );
 
-      const { rows: [{ count }] } = await this.fastify.pg.query(
-        'SELECT COUNT(*) FROM books'
+      const { rows: [{ total }] } = await this.fastify.pg.query<{ total: string }>(
+        'SELECT COUNT(*)::integer as total FROM books'
       );
 
-      callback(null, { books, total: parseInt(count) });
+      callback(null, { books, total: parseInt(total) });
     } catch (error) {
       callback({
-        code: 13,
-        message: 'Internal server error'
+        code: Status.INTERNAL,
+        message: 'Internal server error',
       });
     }
   }
 
-  async updateBook(call: ServerUnaryCall<UpdateBookRequest, Book>, callback: sendUnaryData<Book>) {
+  async UpdateBook(call: ServerUnaryCall<UpdateBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const { id, title, author, isbn, publishYear } = call.request;
-      const { rows } = await this.fastify.pg.query(
+
+      if (isbn && !/^\d{13}$/.test(isbn)) {
+        return callback({
+          code: Status.INVALID_ARGUMENT,
+          message: 'ISBN must be 13 digits',
+        });
+      }
+
+      const { rows } = await this.fastify.pg.query<Book>(
         `UPDATE books 
          SET title = COALESCE($2, title),
              author = COALESCE($3, author),
              isbn = COALESCE($4, isbn),
-             publishYear = COALESCE($5, publishYear),
+             publish_year = COALESCE($5, publish_year),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
-         RETURNING *`,
+         RETURNING id, title, author, isbn, publish_year as "publishYear"`,
         [id, title, author, isbn, publishYear]
       );
 
       if (rows.length === 0) {
         return callback({
-          code: 5,
-          message: `Book with id ${id} not found`
+          code: Status.NOT_FOUND,
+          message: `Book with id ${id} not found`,
         });
       }
 
       callback(null, rows[0]);
-    } catch (error) {
+    } catch (error: any) {
+      if (error.constraint === 'books_isbn_key') {
+        return callback({
+          code: Status.ALREADY_EXISTS,
+          message: 'Book with this ISBN already exists',
+        });
+      }
+
       callback({
-        code: 13,
-        message: 'Internal server error'
+        code: Status.INTERNAL,
+        message: 'Internal server error',
       });
     }
   }
 
-  async deleteBook(call: ServerUnaryCall<DeleteBookRequest, DeleteBookResponse>, callback: sendUnaryData<DeleteBookResponse>) {
+  async DeleteBook(call: ServerUnaryCall<DeleteBookRequest, DeleteBookResponse>, callback: sendUnaryData<DeleteBookResponse>) {
     try {
       const { id } = call.request;
       const { rowCount } = await this.fastify.pg.query(
@@ -126,16 +162,16 @@ export class BookService implements grpc.UntypedServiceImplementation {
 
       if (rowCount === 0) {
         return callback({
-          code: 5,
-          message: `Book with id ${id} not found`
+          code: Status.NOT_FOUND,
+          message: `Book with id ${id} not found`,
         });
       }
 
       callback(null, { success: true });
     } catch (error) {
       callback({
-        code: 13,
-        message: 'Internal server error'
+        code: Status.INTERNAL,
+        message: 'Internal server error',
       });
     }
   }
