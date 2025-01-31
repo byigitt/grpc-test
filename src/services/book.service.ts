@@ -21,6 +21,59 @@ export class BookService implements grpc.UntypedServiceImplementation {
     this.fastify = fastify;
   }
 
+  private validateBook(data: Partial<Book>) {
+    const errors: string[] = [];
+
+    if (data.title && (data.title.length < 1 || data.title.length > 255)) {
+      errors.push('Title must be between 1 and 255 characters');
+    }
+
+    if (data.author && (data.author.length < 1 || data.author.length > 255)) {
+      errors.push('Author must be between 1 and 255 characters');
+    }
+
+    if (data.isbn && !/^\d{13}$/.test(data.isbn)) {
+      errors.push('ISBN must be exactly 13 digits');
+    }
+
+    const currentYear = new Date().getFullYear();
+    if (data.publishYear && (data.publishYear < 1000 || data.publishYear > currentYear)) {
+      errors.push(`Publish year must be between 1000 and ${currentYear}`);
+    }
+
+    return errors;
+  }
+
+  private handleDatabaseError(error: any, callback: sendUnaryData<any>) {
+    this.fastify.log.error(error);
+
+    if (error.constraint === 'books_isbn_key') {
+      return callback({
+        code: Status.ALREADY_EXISTS,
+        message: 'Book with this ISBN already exists',
+      });
+    }
+
+    if (error.code === '23505') { // Unique violation
+      return callback({
+        code: Status.ALREADY_EXISTS,
+        message: 'Duplicate entry found',
+      });
+    }
+
+    if (error.code === '23503') { // Foreign key violation
+      return callback({
+        code: Status.FAILED_PRECONDITION,
+        message: 'Referenced record does not exist',
+      });
+    }
+
+    callback({
+      code: Status.INTERNAL,
+      message: 'Internal server error',
+    });
+  }
+
   async GetBook(call: ServerUnaryCall<GetBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const { id } = call.request;
@@ -47,13 +100,13 @@ export class BookService implements grpc.UntypedServiceImplementation {
 
   async CreateBook(call: ServerUnaryCall<CreateBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
-      const { title, author, isbn, publishYear } = call.request;
+      const bookData = call.request;
+      const validationErrors = this.validateBook(bookData);
 
-      // Validate ISBN format
-      if (isbn && !/^\d{13}$/.test(isbn)) {
+      if (validationErrors.length > 0) {
         return callback({
           code: Status.INVALID_ARGUMENT,
-          message: 'ISBN must be 13 digits',
+          message: validationErrors.join(', '),
         });
       }
 
@@ -61,22 +114,12 @@ export class BookService implements grpc.UntypedServiceImplementation {
         `INSERT INTO books (title, author, isbn, publish_year) 
          VALUES ($1, $2, $3, $4) 
          RETURNING id, title, author, isbn, publish_year as "publishYear"`,
-        [title, author, isbn, publishYear]
+        [bookData.title, bookData.author, bookData.isbn, bookData.publishYear]
       );
 
       callback(null, rows[0]);
-    } catch (error: any) {
-      if (error.constraint === 'books_isbn_key') {
-        return callback({
-          code: Status.ALREADY_EXISTS,
-          message: 'Book with this ISBN already exists',
-        });
-      }
-
-      callback({
-        code: Status.INTERNAL,
-        message: 'Internal server error',
-      });
+    } catch (error) {
+      this.handleDatabaseError(error, callback);
     }
   }
 
@@ -108,12 +151,13 @@ export class BookService implements grpc.UntypedServiceImplementation {
 
   async UpdateBook(call: ServerUnaryCall<UpdateBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
-      const { id, title, author, isbn, publishYear } = call.request;
+      const bookData = call.request;
+      const validationErrors = this.validateBook(bookData);
 
-      if (isbn && !/^\d{13}$/.test(isbn)) {
+      if (validationErrors.length > 0) {
         return callback({
           code: Status.INVALID_ARGUMENT,
-          message: 'ISBN must be 13 digits',
+          message: validationErrors.join(', '),
         });
       }
 
@@ -126,29 +170,19 @@ export class BookService implements grpc.UntypedServiceImplementation {
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING id, title, author, isbn, publish_year as "publishYear"`,
-        [id, title, author, isbn, publishYear]
+        [bookData.id, bookData.title, bookData.author, bookData.isbn, bookData.publishYear]
       );
 
       if (rows.length === 0) {
         return callback({
           code: Status.NOT_FOUND,
-          message: `Book with id ${id} not found`,
+          message: `Book with id ${bookData.id} not found`,
         });
       }
 
       callback(null, rows[0]);
-    } catch (error: any) {
-      if (error.constraint === 'books_isbn_key') {
-        return callback({
-          code: Status.ALREADY_EXISTS,
-          message: 'Book with this ISBN already exists',
-        });
-      }
-
-      callback({
-        code: Status.INTERNAL,
-        message: 'Internal server error',
-      });
+    } catch (error) {
+      this.handleDatabaseError(error, callback);
     }
   }
 
