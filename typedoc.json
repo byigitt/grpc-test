@@ -1,0 +1,13 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["./src/services/book.service.ts"],
+  "out": "docs",
+  "name": "Book Service gRPC API Documentation",
+  "excludePrivate": false,
+  "excludeProtected": false,
+  "theme": "default",
+  "plugin": ["typedoc-plugin-missing-exports"],
+  "exclude": ["**/node_modules/**", "**/proto/generated/**"],
+  "excludeExternals": true,
+  "excludeInternal": true
+} 
