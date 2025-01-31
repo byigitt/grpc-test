@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package bookservice;
+package book;
 
 service BookService {
   rpc GetBook (GetBookRequest) returns (Book);
