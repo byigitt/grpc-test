@@ -13,6 +13,13 @@ import { DeleteBookRequest } from '../proto/generated/book/DeleteBookRequest';
 import { ListBooksResponse } from '../proto/generated/book/ListBooksResponse';
 import { DeleteBookResponse } from '../proto/generated/book/DeleteBookResponse';
 
+/**
+ * Service handling gRPC operations for the Book entity.
+ * Implements CRUD operations and listing functionality for books.
+ * 
+ * @example
+ * const bookService = new BookService(fastify);
+ */
 export class BookService implements grpc.UntypedServiceImplementation {
   [key: string]: any;
   private fastify: FastifyInstance;
@@ -21,7 +28,12 @@ export class BookService implements grpc.UntypedServiceImplementation {
     this.fastify = fastify;
   }
 
-  private validateBook(data: Partial<Book>) {
+  /**
+   * Validates book data against business rules
+   * @param data - Partial book data to validate
+   * @returns Array of validation error messages, empty if valid
+   */
+  private validateBook(data: Partial<Book>): string[] {
     const errors: string[] = [];
 
     if (data.title && (data.title.length < 1 || data.title.length > 255)) {
@@ -44,7 +56,12 @@ export class BookService implements grpc.UntypedServiceImplementation {
     return errors;
   }
 
-  private handleDatabaseError(error: any, callback: sendUnaryData<any>) {
+  /**
+   * Handles database errors and converts them to appropriate gRPC status codes
+   * @param error - The caught database error
+   * @param callback - gRPC callback function to send the response
+   */
+  private handleDatabaseError(error: any, callback: sendUnaryData<any>): void {
     this.fastify.log.error(error);
 
     if (error.constraint === 'books_isbn_key') {
@@ -74,6 +91,34 @@ export class BookService implements grpc.UntypedServiceImplementation {
     });
   }
 
+  /**
+   * Retrieves a single book by its ID
+   * @param call - gRPC call object containing the book ID
+   * @param callback - Function to send the response
+   * @throws {Status.NOT_FOUND} When book doesn't exist
+   * @throws {Status.INTERNAL} On database errors
+   * 
+   * @example
+   * // Request:
+   * {
+   *   "id": 1
+   * }
+   * 
+   * // Success Response:
+   * {
+   *   "id": 1,
+   *   "title": "The Great Gatsby",
+   *   "author": "F. Scott Fitzgerald",
+   *   "isbn": "9780743273565",
+   *   "publishYear": 1925
+   * }
+   * 
+   * // Error Response (Not Found):
+   * {
+   *   "code": 5,
+   *   "message": "Book not found"
+   * }
+   */
   async GetBook(call: ServerUnaryCall<GetBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const { id } = call.request;
@@ -98,6 +143,38 @@ export class BookService implements grpc.UntypedServiceImplementation {
     }
   }
 
+  /**
+   * Creates a new book
+   * @param call - gRPC call object containing the book data
+   * @param callback - Function to send the response
+   * @throws {Status.INVALID_ARGUMENT} When validation fails
+   * @throws {Status.ALREADY_EXISTS} When ISBN is duplicate
+   * @throws {Status.INTERNAL} On database errors
+   * 
+   * @example
+   * // Request:
+   * {
+   *   "title": "The Great Gatsby",
+   *   "author": "F. Scott Fitzgerald",
+   *   "isbn": "9780743273565",
+   *   "publishYear": 1925
+   * }
+   * 
+   * // Success Response:
+   * {
+   *   "id": 1,
+   *   "title": "The Great Gatsby",
+   *   "author": "F. Scott Fitzgerald",
+   *   "isbn": "9780743273565",
+   *   "publishYear": 1925
+   * }
+   * 
+   * // Error Response (Validation):
+   * {
+   *   "code": 3,
+   *   "message": "ISBN must be exactly 13 digits"
+   * }
+   */
   async CreateBook(call: ServerUnaryCall<CreateBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const bookData = call.request;
@@ -123,6 +200,33 @@ export class BookService implements grpc.UntypedServiceImplementation {
     }
   }
 
+  /**
+   * Retrieves a paginated list of books
+   * @param call - gRPC call object containing pagination parameters
+   * @param callback - Function to send the response
+   * @throws {Status.INTERNAL} On database errors
+   * 
+   * @example
+   * // Request:
+   * {
+   *   "page": 1,
+   *   "limit": 10
+   * }
+   * 
+   * // Success Response:
+   * {
+   *   "books": [
+   *     {
+   *       "id": 1,
+   *       "title": "The Great Gatsby",
+   *       "author": "F. Scott Fitzgerald",
+   *       "isbn": "9780743273565",
+   *       "publishYear": 1925
+   *     }
+   *   ],
+   *   "total": 1
+   * }
+   */
   async ListBooks(call: ServerUnaryCall<ListBooksRequest, ListBooksResponse>, callback: sendUnaryData<ListBooksResponse>) {
     try {
       const { page = 1, limit = 10 } = call.request;
@@ -149,6 +253,40 @@ export class BookService implements grpc.UntypedServiceImplementation {
     }
   }
 
+  /**
+   * Updates an existing book
+   * @param call - gRPC call object containing the book data
+   * @param callback - Function to send the response
+   * @throws {Status.NOT_FOUND} When book doesn't exist
+   * @throws {Status.INVALID_ARGUMENT} When validation fails
+   * @throws {Status.ALREADY_EXISTS} When ISBN is duplicate
+   * @throws {Status.INTERNAL} On database errors
+   * 
+   * @example
+   * // Request:
+   * {
+   *   "id": 1,
+   *   "title": "Updated Title",
+   *   "author": "Updated Author",
+   *   "isbn": "9780743273565",
+   *   "publishYear": 1925
+   * }
+   * 
+   * // Success Response:
+   * {
+   *   "id": 1,
+   *   "title": "Updated Title",
+   *   "author": "Updated Author",
+   *   "isbn": "9780743273565",
+   *   "publishYear": 1925
+   * }
+   * 
+   * // Error Response (Not Found):
+   * {
+   *   "code": 5,
+   *   "message": "Book with id 1 not found"
+   * }
+   */
   async UpdateBook(call: ServerUnaryCall<UpdateBookRequest, Book>, callback: sendUnaryData<Book>) {
     try {
       const bookData = call.request;
@@ -186,6 +324,30 @@ export class BookService implements grpc.UntypedServiceImplementation {
     }
   }
 
+  /**
+   * Deletes a book by its ID
+   * @param call - gRPC call object containing the book ID
+   * @param callback - Function to send the response
+   * @throws {Status.NOT_FOUND} When book doesn't exist
+   * @throws {Status.INTERNAL} On database errors
+   * 
+   * @example
+   * // Request:
+   * {
+   *   "id": 1
+   * }
+   * 
+   * // Success Response:
+   * {
+   *   "success": true
+   * }
+   * 
+   * // Error Response (Not Found):
+   * {
+   *   "code": 5,
+   *   "message": "Book with id 1 not found"
+   * }
+   */
   async DeleteBook(call: ServerUnaryCall<DeleteBookRequest, DeleteBookResponse>, callback: sendUnaryData<DeleteBookResponse>) {
     try {
       const { id } = call.request;
